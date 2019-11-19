@@ -23,7 +23,7 @@ class leafNode():
 
 
 class cartTree():
-    def __init__(self, dataSet:pd.DataFrame):
+    def __init__(self, dataSet:pd.DataFrame, circNum=1, attrNum=None):
         self.categoryMode = list()
         labels = sorted(list(set(dataSet['T'])))
         for label in labels:
@@ -33,7 +33,11 @@ class cartTree():
         dataSet = np.array(dataSet)
         dataSet[:, :-1] = (dataSet[:, :-1] - self.mean) / self.std
         # dataSet, self.reconMat = self.pca(dataSet[:, :-1], 4)
-        self.root = self.createTree(dataSet, list(range(dataSet.shape[1] - 1)))
+        self.root = list()
+        attrNum = dataSet.shape[1] - 1 if attrNum is None else attrNum
+        for sub in range(circNum):
+            print(sub)
+            self.root.append(self.createTree(dataSet, attrNum))
 
     # @snoop()
     def pca(self, dataMat, topNfeat=999999):
@@ -46,29 +50,25 @@ class cartTree():
         return dataMat, redEigVects
 
     # @snoop()
-    def createTree(self, dataSet, ableLabel:list):
-        if len(ableLabel) != 0:
-            bestAttr = self.choose_best_feature(np.asarray(dataSet), ableLabel)
-            if bestAttr is None:
-                return leafNode(self.argmaxlabel(dataSet))
-            bestValue = self.choose_best_value(np.asarray(dataSet), bestAttr)
-            if bestValue is None:
-                return leafNode(self.argmaxlabel(dataSet))
-            leftSet = dataSet[dataSet[:, bestAttr] <= bestValue]
-            rightSet = dataSet[dataSet[:, bestAttr] > bestValue]
-            root = rootNode(bestAttr, bestValue)
-            new_labels = ableLabel.copy()
-            new_labels.remove(bestAttr)
-            if leftSet.shape[0] > 50:
-                root.lchild = self.createTree(leftSet, new_labels)
-            else:
-                root.lchild = leafNode(self.argmaxlabel(leftSet))
-            if rightSet.shape[0] > 50:
-                root.rchild = self.createTree(rightSet, new_labels)
-            else:
-                root.rchild = leafNode(self.argmaxlabel(rightSet))
-            return root
-        return leafNode(self.argmaxlabel(dataSet))
+    def createTree(self, dataSet, attrNum):
+        bestAttr = self.choose_best_feature(np.asarray(dataSet), attrNum)
+        if bestAttr is None:
+            return leafNode(self.argmaxlabel(dataSet))
+        bestValue = self.choose_best_value(np.asarray(dataSet), bestAttr)
+        if bestValue is None:
+            return leafNode(self.argmaxlabel(dataSet))
+        leftSet = dataSet[dataSet[:, bestAttr] <= bestValue]
+        rightSet = dataSet[dataSet[:, bestAttr] > bestValue]
+        root = rootNode(bestAttr, bestValue)
+        if leftSet.shape[0] > 30:
+            root.lchild = self.createTree(leftSet, attrNum)
+        else:
+            root.lchild = leafNode(self.argmaxlabel(leftSet))
+        if rightSet.shape[0] > 30:
+            root.rchild = self.createTree(rightSet, attrNum)
+        else:
+            root.rchild = leafNode(self.argmaxlabel(rightSet))
+        return root
 
     def get_shannon_entropy(self, dataSet):
         """
@@ -98,8 +98,10 @@ class cartTree():
                 spl_dataSet.append(reducedFeatVec)
         return spl_dataSet
 
-    def choose_best_feature(self, dataSet, ableLabel):
-        attrNum = len(dataSet[0]) - 1
+    def choose_best_feature(self, dataSet, attrNum):
+        ableLabel = np.arange(0, dataSet.shape[1] - 1)
+        np.random.shuffle(ableLabel)
+        ableLabel = ableLabel[:attrNum]
         baseEnt = self.get_shannon_entropy(dataSet)
         bestGain = -np.inf
         bestAttr = None
@@ -146,10 +148,12 @@ class cartTree():
         labelDict =dict()
         maxNum = 0
         bestLabel = None
+        if isinstance(dataSet, np.ndarray):
+            dataSet = dataSet[:, -1]
         for elem in dataSet:
-            if elem[-1] not in labelDict.keys():
-                labelDict[elem[-1]] = 0
-            labelDict[elem[-1]] +=1
+            if elem not in labelDict.keys():
+                labelDict[elem] = 0
+            labelDict[elem] +=1
         for key, value in labelDict.items():
             if value > maxNum:
                 maxNum = value
@@ -158,11 +162,14 @@ class cartTree():
 
     def search(self, elem):
         dealElem = ((elem - self.mean) / self.std).tolist()
-        labels = self.sampls_search(self.root, dealElem)
-        labels = list(set(labels))
-        if len(labels) == 1:
-            return labels[0]
-        return self.nearset_search(elem, labels)
+        pro_label = list()
+        for root in self.root:
+            pro_label.extend(self.sampls_search(root, dealElem))
+        return self.argmaxlabel(pro_label)
+        # labels = list(set(labels))
+        # if len(labels) == 1:
+        #     return labels[0]
+        # return self.nearset_search(elem, labels)
 
     def sampls_search(self, root:rootNode or leafNode, elem):
         if isinstance(root, leafNode):
@@ -202,6 +209,8 @@ class cartTree():
 dataset = pd.read_csv("./train.csv")
 dataset = dataset.replace('?', np.nan)
 dataset = dataset.astype(float)
+testData = dataset[6001:]
+dataset = dataset[:6001]
 
 labels = set(dataset['T'])
 for label in labels:
@@ -209,14 +218,14 @@ for label in labels:
     # dataset[dataset['T'] == label].boxplot()
     # plt.title(f'label={label}')
     # plt.show()
-testData = pd.read_csv("./train.csv")
-testData = testData.replace('?', np.nan)
-testData = testData.astype(float)
-del testData['T']
+# testData = pd.read_csv("./train.csv")
+# testData = testData.replace('?', np.nan)
+# testData = testData.astype(float)
 
-labels = dataset['T']
-tree = cartTree(dataset)
-#
+tree = cartTree(dataset, circNum=25, attrNum=6)
+
+labels = testData['T']
+del testData['T']
 pro_labels = list()
 for elem in np.array(testData):
     label = tree.search(elem)
@@ -227,5 +236,6 @@ labels = np.array(labels, dtype=int)
 pro_labels = np.array(pro_labels, dtype=int)
 print(pro_labels)
 print((labels == pro_labels).tolist().count(True))
-# # pd.DataFrame(pro_labels).to_csv('./pro.csv')
+# pd.DataFrame(pro_labels).to_csv('./pro.csv')
 # print(type(np.array(testData)[0, 9]))
+
